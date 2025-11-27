@@ -21,7 +21,9 @@ const EnvSchema = z.object({
   SUPABASE_ANON_KEY: z.string().min(1, 'SUPABASE_ANON_KEY must not be empty'),
   TELEGRAM_BOT_TOKEN: z.string().min(1, 'TELEGRAM_BOT_TOKEN must not be empty'),
   METRICS_ENDPOINT: z.string().url().optional(),
-  METRICS_BOT_TOKEN: z.string().min(1, 'METRICS_BOT_TOKEN must not be empty').optional()
+  METRICS_BOT_TOKEN: z.string().min(1, 'METRICS_BOT_TOKEN must not be empty').optional(),
+  PREVIEW_CODES_ENDPOINT: z.string().url().optional(),
+  PREVIEW_CODES_BOT_TOKEN: z.string().min(1, 'PREVIEW_CODES_BOT_TOKEN must not be empty').optional()
 });
 
 export type Env = z.infer<typeof EnvSchema>;

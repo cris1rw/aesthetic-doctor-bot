@@ -259,15 +259,15 @@ async function findExistingCodes(codes: string[]): Promise<string[]> {
   if (!codes.length) return [];
   const { data, error } = await supabaseClient
     .from(ARC_CODES_TABLE)
-    .select('code')
-    .in('code', codes);
+    .select('code_plain')
+    .in('code_plain', codes);
 
   if (error) {
     logger.warn({ err: error }, 'Impossibile verificare i codici ARC su Supabase');
     return [];
   }
 
-  return (data ?? []).map((row) => row.code as string);
+  return (data ?? []).map((row) => row.code_plain as string);
 }
 
 async function respondWithArcCodes(
@@ -294,16 +294,41 @@ async function respondWithArcCodes(
 }
 
 async function saveGeneratedCodes(firstName: string, lastName: string, codes: string[]): Promise<void> {
-  const expiresAt = new Date(Date.now() + ARC_CODE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
-  const rows = codes.map((code) => ({
-    code_plain: code,
-    label: ARC_CODE_LABEL,
-    expires_at: expiresAt,
-    end_message: `Codice generato per ${firstName} ${lastName}`
-  }));
+  const endpoint = env.PREVIEW_CODES_ENDPOINT;
+  const token = env.PREVIEW_CODES_BOT_TOKEN;
 
-  const { error } = await supabaseClient.from(ARC_CODES_TABLE).insert(rows);
-  if (error) {
+  if (!endpoint || !token) {
+    logger.warn(
+      'La funzione preview-codes non è configurata (PREVIEW_CODES_ENDPOINT / PREVIEW_CODES_BOT_TOKEN mancanti). I codici non verranno salvati.'
+    );
+    return;
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'x-bot-token': token,
+        'content-type': 'application/json',
+        Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`
+      },
+      body: JSON.stringify({
+        firstName,
+        lastName,
+        codes,
+        label: ARC_CODE_LABEL,
+        ttlDays: ARC_CODE_TTL_DAYS
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Preview codes endpoint responded with ${response.status}: ${errorText}`);
+    }
+
+    const result = await response.json();
+    logger.info({ result }, 'Codici ARC salvati con successo');
+  } catch (error) {
     logger.warn({ err: error }, 'Impossibile salvare i codici ARC su Supabase');
   }
 }
