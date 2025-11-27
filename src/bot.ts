@@ -47,8 +47,8 @@ const CHARTABLE_METRICS = new Set<MetricKey>(['treatments_daily', 'comparisons_d
 const ARC_CODES_TABLE = 'preview_one_time_codes';
 const ARC_CODE_LABEL = 'MED';
 const ARC_CODE_TTL_DAYS = 45;
-const YES_VALUES = new Set(['si', 'sì', 'yes', 'y']);
-const NO_VALUES = new Set(['no', 'n']);
+const YES_VALUES = new Set(['ok']);
+const NO_VALUES = new Set(['ko']);
 
 export function createBot(): Bot<BotContext> {
   const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN);
@@ -182,13 +182,13 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
         fallbackCodes
       };
       await ctx.reply(
-        `⚠️ I codici ${primaryCodes.join(', ')} risultano già esistenti.\n\nVuoi generare i codici alternativi ${fallbackCodes.join(', ')}?\n\nRispondi "sì" o "no".`
+        `⚠️ I codici ${primaryCodes.join(', ')} risultano già esistenti.\n\nVuoi generare i codici alternativi ${fallbackCodes.join(', ')}?\n\nRispondi "ok" o "ko".`
       );
       return true;
     }
     case 'await_fallback_confirmation': {
       if (!messageText) {
-        await ctx.reply('Rispondi con "sì" o "no".');
+        await ctx.reply('Rispondi con "ok" o "ko".');
         return true;
       }
       const normalized = messageText.toLowerCase();
@@ -216,7 +216,7 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
         return true;
       }
 
-      await ctx.reply('Rispondi con "sì" oppure "no".');
+      await ctx.reply('Rispondi con "ok" oppure "ko".');
       return true;
     }
     default:
