@@ -53,11 +53,11 @@ Future steps (dashboard integration, RPC calls, webhook deployments) can reuse t
    - `/metrics_csv` → CSV allegato.
    - `/metrics_chart` → grafico PNG per `treatments_daily` o `comparisons_daily`.
    - `/doctor_activity` → mostra per ogni medico pazienti/trattamenti/foto caricati.
-   - `/arc` → guidato per generare due codici ARC (es. `ARC-ROSSI-1/2`).
+   - `/get_new_code` → guidato per generare due codici ARC (es. `ARC-ROSSI-1/2`).
 
 Tutti i comandi (tranne `/doctor_activity` e `/arc`, che sono già focalizzati) accettano parametri aggiuntivi (es. `/metrics_csv treatments_daily comparisons_summary`) per includere solo i dataset desiderati.
 
-### Generatore di codici ARC (`/arc`)
+### Generatore di codici ARC (`/get_new_code`)
 
 Il bot chiede nome e cognome del medico, propone i codici `ARC-COGNOME-1/2` (con fallback `ARC-NCOGNOME-1/2` se già occupati) e restituisce il JSON nel formato:
 
@@ -69,5 +69,5 @@ Il bot chiede nome e cognome del medico, propone i codici `ARC-COGNOME-1/2` (con
 }
 ```
 
-Per il controllo dei duplicati viene usata la tabella `arc_codes` su Supabase (colonne suggerite: `code` text unique, `label`, `ttl_days`, `doctor_first_name`, `doctor_last_name`). Assicurati che la tabella esista sia in test sia in produzione.
+Per il controllo dei duplicati viene usata la tabella `preview_one_time_codes` su Supabase (colonne suggerite: `code` text unique, `label`, `ttl_days`, `doctor_first_name`, `doctor_last_name`). Assicurati che la tabella esista sia in test sia in produzione.
 

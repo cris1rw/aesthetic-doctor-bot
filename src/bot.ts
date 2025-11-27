@@ -44,7 +44,7 @@ const METRICS_FORMATS = ['json', 'text', 'csv', 'chart'] as const;
 type MetricsFormat = (typeof METRICS_FORMATS)[number];
 
 const CHARTABLE_METRICS = new Set<MetricKey>(['treatments_daily', 'comparisons_daily']);
-const ARC_CODES_TABLE = 'arc_codes';
+const ARC_CODES_TABLE = 'preview_one_time_codes';
 const ARC_CODE_LABEL = 'MED';
 const ARC_CODE_TTL_DAYS = 45;
 const YES_VALUES = new Set(['si', 'sì', 'yes', 'y']);
@@ -79,7 +79,7 @@ export function createBot(): Bot<BotContext> {
         description: 'Mostra il contributo di ogni medico (pazienti/tratt/foto)'
       },
       {
-        command: 'arc',
+        command: 'get_new_code',
         description: 'Genera due codici ARC per un medico'
       }
     ])
@@ -100,7 +100,7 @@ export function createBot(): Bot<BotContext> {
   bot.command('doctor_activity', (ctx) =>
     handleMetricsCommand(ctx, { forcedFormat: 'text', forcedMetrics: ['doctor_activity'] })
   );
-  bot.command('arc', async (ctx) => {
+  bot.command('get_new_code', async (ctx) => {
     ctx.session.arc = { step: 'await_first_name' };
     await ctx.reply('Inserisci il nome del medico:');
   });
@@ -119,7 +119,7 @@ export function createBot(): Bot<BotContext> {
         '- /metrics_csv → CSV per Excel',
         '- /metrics_chart → grafico giornaliero',
         '- /doctor_activity → attività per medico',
-        '- /arc → genera codici ARC'
+        '- /get_new_code → genera codici ARC'
       ].join('\n')
     );
   });
