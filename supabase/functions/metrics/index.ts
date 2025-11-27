@@ -9,7 +9,8 @@ type MetricKey =
   | 'photos_per_treatment'
   | 'comparisons_summary'
   | 'comparisons_daily'
-  | 'comparisons_exports_recent';
+  | 'comparisons_exports_recent'
+  | 'doctor_activity';
 
 type MetricRunner = (sql: ReturnType<typeof postgres>) => Promise<any>;
 
@@ -137,6 +138,42 @@ const metricRunners: Record<MetricKey, MetricRunner> = {
       JOIN public.users u ON u.id = c.owner_user_id
       WHERE (c.export_meta->>'lastExportTs')::timestamptz >= NOW() - INTERVAL '30 days'
       ORDER BY last_export_ts DESC NULLS LAST
+      LIMIT 100;
+    `;
+  },
+
+  async doctor_activity(sql) {
+    return sql/*sql*/`
+      WITH patient_counts AS (
+        SELECT owner_user_id, COUNT(*) AS total_pazienti
+        FROM public.patients
+        GROUP BY owner_user_id
+      ),
+      treatment_counts AS (
+        SELECT owner_user_id, COUNT(*) AS total_trattamenti
+        FROM public.treatments
+        GROUP BY owner_user_id
+      ),
+      photo_counts AS (
+        SELECT owner_user_id, COUNT(*) AS total_foto
+        FROM public.photos
+        GROUP BY owner_user_id
+      )
+      SELECT
+        COALESCE(u.nome, '—')    AS nome,
+        COALESCE(u.cognome, '—') AS cognome,
+        COALESCE(u.nome, u.email, '—') AS medico,
+        COALESCE(pc.total_pazienti, 0)::int    AS pazienti_aggiunti,
+        COALESCE(tc.total_trattamenti, 0)::int AS trattamenti_aggiunti,
+        COALESCE(fc.total_foto, 0)::int        AS foto_caricate
+      FROM public.users u
+      LEFT JOIN patient_counts  pc ON pc.owner_user_id  = u.id
+      LEFT JOIN treatment_counts tc ON tc.owner_user_id = u.id
+      LEFT JOIN photo_counts    fc ON fc.owner_user_id  = u.id
+      WHERE COALESCE(pc.total_pazienti, 0)
+          + COALESCE(tc.total_trattamenti, 0)
+          + COALESCE(fc.total_foto, 0) > 0
+      ORDER BY foto_caricate DESC, trattamenti_aggiunti DESC, pazienti_aggiunti DESC
       LIMIT 100;
     `;
   },
