@@ -1,7 +1,24 @@
-import { Bot, Context, InputFile } from 'grammy';
+import { Bot, Context, InputFile, session, SessionFlavor } from 'grammy';
 
 import { env } from './env';
 import { logger } from './logger';
+import { supabaseClient } from './supabaseClient';
+
+type ArcWizardStep = 'idle' | 'await_first_name' | 'await_last_name' | 'await_fallback_confirmation';
+
+interface ArcWizardState {
+  step: ArcWizardStep;
+  firstName?: string;
+  lastName?: string;
+  primaryCodes?: string[];
+  fallbackCodes?: string[];
+}
+
+interface SessionData {
+  arc: ArcWizardState;
+}
+
+type BotContext = Context & SessionFlavor<SessionData>;
 
 const METRIC_KEYS = [
   'treatments_daily',
@@ -27,9 +44,21 @@ const METRICS_FORMATS = ['json', 'text', 'csv', 'chart'] as const;
 type MetricsFormat = (typeof METRICS_FORMATS)[number];
 
 const CHARTABLE_METRICS = new Set<MetricKey>(['treatments_daily', 'comparisons_daily']);
+const ARC_CODES_TABLE = 'arc_codes';
+const ARC_CODE_LABEL = 'MED';
+const ARC_CODE_TTL_DAYS = 45;
+const YES_VALUES = new Set(['si', 'sì', 'yes', 'y']);
+const NO_VALUES = new Set(['no', 'n']);
 
-export function createBot(): Bot<Context> {
-  const bot = new Bot(env.TELEGRAM_BOT_TOKEN);
+export function createBot(): Bot<BotContext> {
+  const bot = new Bot<BotContext>(env.TELEGRAM_BOT_TOKEN);
+  bot.use(
+    session({
+      initial: (): SessionData => ({
+        arc: { step: 'idle' }
+      })
+    })
+  );
 
   bot.api
     .setMyCommands([
@@ -48,6 +77,10 @@ export function createBot(): Bot<Context> {
       {
         command: 'doctor_activity',
         description: 'Mostra il contributo di ogni medico (pazienti/tratt/foto)'
+      },
+      {
+        command: 'arc',
+        description: 'Genera due codici ARC per un medico'
       }
     ])
     .catch((error) => logger.error({ err: error }, 'Failed to set bot commands'));
@@ -67,8 +100,15 @@ export function createBot(): Bot<Context> {
   bot.command('doctor_activity', (ctx) =>
     handleMetricsCommand(ctx, { forcedFormat: 'text', forcedMetrics: ['doctor_activity'] })
   );
+  bot.command('arc', async (ctx) => {
+    ctx.session.arc = { step: 'await_first_name' };
+    await ctx.reply('Inserisci il nome del medico:');
+  });
 
   bot.on('message', async (ctx) => {
+    if (await handleArcWizardMessage(ctx)) {
+      return;
+    }
     const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name ?? 'utente';
     await ctx.reply(
       [
@@ -77,7 +117,9 @@ export function createBot(): Bot<Context> {
         'Puoi usare i comandi: ',
         '- /metrics_text → mini-report leggibile',
         '- /metrics_csv → CSV per Excel',
-        '- /metrics_chart → grafico giornaliero'
+        '- /metrics_chart → grafico giornaliero',
+        '- /doctor_activity → attività per medico',
+        '- /arc → genera codici ARC'
       ].join('\n')
     );
   });
@@ -95,8 +137,165 @@ export function createBot(): Bot<Context> {
   return bot;
 }
 
+async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
+  const arc = ctx.session.arc ?? { step: 'idle' };
+  const messageText = ctx.message?.text?.trim();
+
+  switch (arc.step) {
+    case 'await_first_name': {
+      if (!messageText) {
+        await ctx.reply('Per favore inserisci un nome valido.');
+        return true;
+      }
+      ctx.session.arc = { step: 'await_last_name', firstName: messageText };
+      await ctx.reply('Perfetto, ora inserisci il cognome del medico:');
+      return true;
+    }
+    case 'await_last_name': {
+      if (!messageText) {
+        await ctx.reply('Per favore inserisci un cognome valido.');
+        return true;
+      }
+      const firstName = arc.firstName ?? '';
+      const lastName = messageText;
+      const primaryCodes = buildArcCodes(firstName, lastName, { useFirstInitial: false });
+      const fallbackCodes = buildArcCodes(firstName, lastName, { useFirstInitial: true });
+      const conflicts = await findExistingCodes(primaryCodes);
+
+      if (conflicts.length === 0) {
+        await respondWithArcCodes(ctx, firstName, lastName, primaryCodes);
+        resetArcWizard(ctx);
+        return true;
+      }
+
+      ctx.session.arc = {
+        step: 'await_fallback_confirmation',
+        firstName,
+        lastName,
+        primaryCodes,
+        fallbackCodes
+      };
+      await ctx.reply(
+        `I codici ${primaryCodes.join(', ')} risultano già esistenti. Vuoi generare i codici alternativi ${fallbackCodes.join(', ')}? Rispondi "sì" o "no".`
+      );
+      return true;
+    }
+    case 'await_fallback_confirmation': {
+      if (!messageText) {
+        await ctx.reply('Rispondi con "sì" o "no".');
+        return true;
+      }
+      const normalized = messageText.toLowerCase();
+      const firstName = arc.firstName ?? '';
+      const lastName = arc.lastName ?? '';
+
+      if (YES_VALUES.has(normalized)) {
+        const fallbackCodes = arc.fallbackCodes ?? [];
+        const conflicts = await findExistingCodes(fallbackCodes);
+        if (conflicts.length > 0) {
+          await ctx.reply(
+            `Anche i codici alternativi ${fallbackCodes.join(', ')} esistono già. Genera manualmente un prefisso diverso.`
+          );
+          resetArcWizard(ctx);
+          return true;
+        }
+        await respondWithArcCodes(ctx, firstName, lastName, fallbackCodes);
+        resetArcWizard(ctx);
+        return true;
+      }
+
+      if (NO_VALUES.has(normalized)) {
+        await ctx.reply('Operazione annullata. Puoi ripartire con /arc.');
+        resetArcWizard(ctx);
+        return true;
+      }
+
+      await ctx.reply('Rispondi con "sì" oppure "no".');
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+function resetArcWizard(ctx: BotContext): void {
+  ctx.session.arc = { step: 'idle' };
+}
+
+function buildArcCodes(firstName: string, lastName: string, options: { useFirstInitial: boolean }): string[] {
+  const normalizedLast = normalizeForCode(lastName);
+  const normalizedFirst = normalizeForCode(firstName);
+  const base =
+    options.useFirstInitial && normalizedFirst
+      ? `${normalizedFirst[0]}${normalizedLast}`.replace(/^-/, '')
+      : normalizedLast;
+  const prefix = base || (options.useFirstInitial ? normalizedFirst || 'ARC' : 'ARC');
+  return [`ARC-${prefix}-1`, `ARC-${prefix}-2`];
+}
+
+function normalizeForCode(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]/g, '')
+    .toUpperCase();
+}
+
+async function findExistingCodes(codes: string[]): Promise<string[]> {
+  if (!codes.length) return [];
+  const { data, error } = await supabaseClient
+    .from(ARC_CODES_TABLE)
+    .select('code')
+    .in('code', codes);
+
+  if (error) {
+    logger.warn({ err: error }, 'Impossibile verificare i codici ARC su Supabase');
+    return [];
+  }
+
+  return (data ?? []).map((row) => row.code as string);
+}
+
+async function respondWithArcCodes(
+  ctx: BotContext,
+  firstName: string,
+  lastName: string,
+  codes: string[]
+): Promise<void> {
+  const payload = {
+    label: ARC_CODE_LABEL,
+    codes,
+    ttl_days: ARC_CODE_TTL_DAYS
+  };
+
+  await ctx.reply(
+    [
+      `Codici generati per ${firstName} ${lastName}:`,
+      JSON.stringify(payload, null, 2),
+      'Copia il JSON sopra per la tua query.'
+    ].join('\n')
+  );
+
+  await saveGeneratedCodes(firstName, lastName, codes);
+}
+
+async function saveGeneratedCodes(firstName: string, lastName: string, codes: string[]): Promise<void> {
+  const rows = codes.map((code) => ({
+    code,
+    label: ARC_CODE_LABEL,
+    ttl_days: ARC_CODE_TTL_DAYS,
+    doctor_first_name: firstName,
+    doctor_last_name: lastName
+  }));
+
+  const { error } = await supabaseClient.from(ARC_CODES_TABLE).insert(rows);
+  if (error) {
+    logger.warn({ err: error }, 'Impossibile salvare i codici ARC su Supabase');
+  }
+}
+
 async function handleMetricsCommand(
-  ctx: Context,
+  ctx: BotContext,
   options?: {
     forcedFormat?: MetricsFormat;
     forcedMetrics?: MetricKey[];
