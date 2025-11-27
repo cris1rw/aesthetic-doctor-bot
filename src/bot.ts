@@ -276,21 +276,15 @@ async function respondWithArcCodes(
   lastName: string,
   codes: string[]
 ): Promise<void> {
-  const payload = {
-    label: ARC_CODE_LABEL,
-    codes,
-    ttl_days: ARC_CODE_TTL_DAYS
-  };
+  await saveGeneratedCodes(firstName, lastName, codes);
 
   await ctx.reply(
     [
-      `Codici generati per ${firstName} ${lastName}:`,
-      JSON.stringify(payload, null, 2),
-      'Copia il JSON sopra per la tua query.'
+      `✅ Codici creati per ${firstName} ${lastName}:`,
+      `\n${codes.map((c) => `• ${c}`).join('\n')}`,
+      `\n⚠️ Salvali da qualche parte e non chiederli a Cri.`
     ].join('\n')
   );
-
-  await saveGeneratedCodes(firstName, lastName, codes);
 }
 
 async function saveGeneratedCodes(firstName: string, lastName: string, codes: string[]): Promise<void> {
