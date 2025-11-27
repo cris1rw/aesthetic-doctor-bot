@@ -52,6 +52,7 @@ Future steps (dashboard integration, RPC calls, webhook deployments) can reuse t
    - `/metrics_text` → riassunto testuale.
    - `/metrics_csv` → CSV allegato.
    - `/metrics_chart` → grafico PNG per `treatments_daily` o `comparisons_daily`.
+   - `/doctor_activity` → mostra per ogni medico pazienti/trattamenti/foto caricati.
 
-Tutti i comandi accettano parametri aggiuntivi (es. `/metrics_csv treatments_daily comparisons_summary`) per includere solo i dataset desiderati.
+Tutti i comandi (tranne `/doctor_activity`, che è già focalizzato) accettano parametri aggiuntivi (es. `/metrics_csv treatments_daily comparisons_summary`) per includere solo i dataset desiderati.
 

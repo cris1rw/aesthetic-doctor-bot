@@ -10,7 +10,8 @@ const METRIC_KEYS = [
   'photos_per_treatment',
   'comparisons_summary',
   'comparisons_daily',
-  'comparisons_exports_recent'
+  'comparisons_exports_recent',
+  'doctor_activity'
 ] as const;
 
 type MetricKey = (typeof METRIC_KEYS)[number];
@@ -43,6 +44,10 @@ export function createBot(): Bot<Context> {
       {
         command: 'metrics_chart',
         description: 'Genera il grafico giornaliero di trattamenti o comparisons'
+      },
+      {
+        command: 'doctor_activity',
+        description: 'Mostra il contributo di ogni medico (pazienti/tratt/foto)'
       }
     ])
     .catch((error) => logger.error({ err: error }, 'Failed to set bot commands'));
@@ -59,6 +64,9 @@ export function createBot(): Bot<Context> {
   bot.command('metrics_text', (ctx) => handleMetricsCommand(ctx, { forcedFormat: 'text' }));
   bot.command('metrics_csv', (ctx) => handleMetricsCommand(ctx, { forcedFormat: 'csv' }));
   bot.command('metrics_chart', (ctx) => handleMetricsCommand(ctx, { forcedFormat: 'chart' }));
+  bot.command('doctor_activity', (ctx) =>
+    handleMetricsCommand(ctx, { forcedFormat: 'text', forcedMetrics: ['doctor_activity'] })
+  );
 
   bot.on('message', async (ctx) => {
     const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name ?? 'utente';
@@ -91,6 +99,7 @@ async function handleMetricsCommand(
   ctx: Context,
   options?: {
     forcedFormat?: MetricsFormat;
+    forcedMetrics?: MetricKey[];
   }
 ): Promise<void> {
     const metricsEndpoint = env.METRICS_ENDPOINT;
@@ -106,7 +115,7 @@ async function handleMetricsCommand(
     const rawMatch = ctx.match;
     const matchInput = typeof rawMatch === 'string' ? rawMatch : rawMatch?.[0] ?? '';
     const { format, metrics } = parseCommandOptions(matchInput, options?.forcedFormat);
-    const requestedKeys = metrics.length > 0 ? metrics : [...METRIC_KEYS];
+    const requestedKeys = options?.forcedMetrics ?? (metrics.length > 0 ? metrics : [...METRIC_KEYS]);
 
     try {
       const payload = await fetchMetrics(metricsEndpoint, metricsToken, requestedKeys);
@@ -294,6 +303,15 @@ function formatTextSummary(payload: MetricsResponse, metrics: MetricKey[]): stri
         lines.push('📤 Export comparisons recenti (Top 5):');
         rows.slice(0, 5).forEach((row) => {
           lines.push(`  • ${displayName(row)} → ${row.last_export_ts ? formatDateTime(row.last_export_ts) : '–'}`);
+        });
+        break;
+      }
+      case 'doctor_activity': {
+        lines.push('🧑‍⚕️ Attività per medico (Top 5 per foto):');
+        rows.slice(0, 5).forEach((row) => {
+          lines.push(
+            `  • ${displayName(row)} → pazienti ${row.pazienti_aggiunti ?? 0}, trattamenti ${row.trattamenti_aggiunti ?? 0}, foto ${row.foto_caricate ?? 0}`
+          );
         });
         break;
       }
