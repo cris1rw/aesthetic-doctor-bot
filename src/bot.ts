@@ -294,12 +294,12 @@ async function respondWithArcCodes(
 }
 
 async function saveGeneratedCodes(firstName: string, lastName: string, codes: string[]): Promise<void> {
+  const expiresAt = new Date(Date.now() + ARC_CODE_TTL_DAYS * 24 * 60 * 60 * 1000).toISOString();
   const rows = codes.map((code) => ({
-    code,
+    code_plain: code,
     label: ARC_CODE_LABEL,
-    ttl_days: ARC_CODE_TTL_DAYS,
-    doctor_first_name: firstName,
-    doctor_last_name: lastName
+    expires_at: expiresAt,
+    end_message: `Codice generato per ${firstName} ${lastName}`
   }));
 
   const { error } = await supabaseClient.from(ARC_CODES_TABLE).insert(rows);
