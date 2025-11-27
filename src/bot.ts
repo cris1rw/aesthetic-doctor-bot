@@ -1,4 +1,4 @@
-import { Bot, Context, InputFile, session, SessionFlavor } from 'grammy';
+import { Bot, Context, InputFile, session, SessionFlavor, GrammyError } from 'grammy';
 
 import { env } from './env';
 import { logger } from './logger';
@@ -106,9 +106,9 @@ export function createBot(): Bot<BotContext> {
   });
 
   bot.on('message', async (ctx) => {
-    if (await handleArcWizardMessage(ctx)) {
-      return;
-    }
+    const handled = await handleArcWizardMessage(ctx);
+    if (handled) return;
+
     const username = ctx.from?.username ? `@${ctx.from.username}` : ctx.from?.first_name ?? 'utente';
     await ctx.reply(
       [
@@ -139,6 +139,9 @@ export function createBot(): Bot<BotContext> {
 
 async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
   const arc = ctx.session.arc ?? { step: 'idle' };
+  if (arc.step === 'idle') {
+    return false;
+  }
   const messageText = ctx.message?.text?.trim();
 
   switch (arc.step) {
@@ -214,7 +217,18 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
       return true;
     }
     default:
-      return false;
+      if (ctx.chat?.id) {
+        try {
+          await ctx.api.sendMessage(
+            ctx.chat.id,
+            'Workflow ARC interrotto. Usa /get_new_code per ripartire.'
+          );
+        } catch (error) {
+          logger.warn({ err: error }, 'Failed to notify user about ARC wizard fallback');
+        }
+      }
+      resetArcWizard(ctx);
+      return true;
   }
 }
 
