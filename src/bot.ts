@@ -163,7 +163,10 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
       const lastName = messageText;
       const primaryCodes = buildArcCodes(firstName, lastName, { useFirstInitial: false });
       const fallbackCodes = buildArcCodes(firstName, lastName, { useFirstInitial: true });
+      
+      logger.info({ primaryCodes, fallbackCodes }, 'Verificando codici esistenti');
       const conflicts = await findExistingCodes(primaryCodes);
+      logger.info({ conflicts, primaryCodes }, 'Risultato verifica codici');
 
       if (conflicts.length === 0) {
         await respondWithArcCodes(ctx, firstName, lastName, primaryCodes);
@@ -179,7 +182,7 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
         fallbackCodes
       };
       await ctx.reply(
-        `I codici ${primaryCodes.join(', ')} risultano già esistenti. Vuoi generare i codici alternativi ${fallbackCodes.join(', ')}? Rispondi "sì" o "no".`
+        `⚠️ I codici ${primaryCodes.join(', ')} risultano già esistenti.\n\nVuoi generare i codici alternativi ${fallbackCodes.join(', ')}?\n\nRispondi "sì" o "no".`
       );
       return true;
     }
@@ -208,7 +211,7 @@ async function handleArcWizardMessage(ctx: BotContext): Promise<boolean> {
       }
 
       if (NO_VALUES.has(normalized)) {
-        await ctx.reply('Operazione annullata. Puoi ripartire con /arc.');
+        await ctx.reply('Operazione annullata. Puoi ripartire con /get_new_code.');
         resetArcWizard(ctx);
         return true;
       }
@@ -257,17 +260,40 @@ function normalizeForCode(value: string): string {
 
 async function findExistingCodes(codes: string[]): Promise<string[]> {
   if (!codes.length) return [];
-  const { data, error } = await supabaseClient
-    .from(ARC_CODES_TABLE)
-    .select('code_plain')
-    .in('code_plain', codes);
+  
+  const endpoint = env.PREVIEW_CODES_ENDPOINT;
+  const token = env.PREVIEW_CODES_BOT_TOKEN;
 
-  if (error) {
-    logger.warn({ err: error }, 'Impossibile verificare i codici ARC su Supabase');
+  if (!endpoint || !token) {
+    logger.warn('La funzione preview-codes non è configurata per la verifica. Assumendo che i codici non esistano.');
     return [];
   }
 
-  return (data ?? []).map((row) => row.code_plain as string);
+  try {
+    const url = new URL(endpoint);
+    url.searchParams.set('codes', codes.join(','));
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
+      headers: {
+        'x-bot-token': token,
+        Authorization: `Bearer ${env.SUPABASE_ANON_KEY}`
+      }
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.warn({ status: response.status, errorText, codes }, 'Errore durante la verifica dei codici');
+      return [];
+    }
+
+    const result = await response.json() as { existing: string[] };
+    logger.info({ codes, existing: result.existing }, 'Codici verificati');
+    return result.existing ?? [];
+  } catch (err) {
+    logger.error({ err, codes }, 'Errore durante la verifica dei codici');
+    return [];
+  }
 }
 
 async function respondWithArcCodes(

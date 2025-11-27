@@ -40,10 +40,6 @@ type PreviewCodeRequest = {
 };
 
 Deno.serve(async (req) => {
-  if (req.method !== 'POST') {
-    return new Response('Method Not Allowed', { status: 405 });
-  }
-
   const url = new URL(req.url);
   if (url.pathname !== '/preview-codes') {
     return new Response('Not Found', { status: 404 });
@@ -52,6 +48,65 @@ Deno.serve(async (req) => {
   const providedToken = req.headers.get('x-bot-token') ?? '';
   if (providedToken !== BOT_TOKEN) {
     return unauthorizedResponse();
+  }
+
+  // GET: verifica codici esistenti
+  if (req.method === 'GET') {
+    const codesParam = url.searchParams.get('codes');
+    if (!codesParam) {
+      return new Response(
+        JSON.stringify({ error: 'Missing codes parameter (comma-separated)' }),
+        {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        }
+      );
+    }
+
+    const codes = codesParam.split(',').map((c) => c.trim()).filter(Boolean);
+    if (codes.length === 0) {
+      return new Response(JSON.stringify({ existing: [] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
+    const sql = createSqlClient();
+    try {
+      const existing = await sql`
+        SELECT code_plain
+        FROM public.preview_one_time_codes
+        WHERE code_plain = ANY(${codes})
+      `;
+
+      return new Response(
+        JSON.stringify({
+          existing: existing.map((row: { code_plain: string }) => row.code_plain),
+        }),
+        {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }
+      );
+    } catch (error) {
+      console.error('Check codes function error', error);
+      return new Response(
+        JSON.stringify({ error: 'Failed to check codes', details: String(error) }),
+        {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        }
+      );
+    } finally {
+      await sql.end({ timeout: 5 }).catch((endErr: unknown) => {
+        console.error('Error closing SQL connection', endErr);
+      });
+    }
+  }
+
+  // POST: inserisci codici
+  if (req.method !== 'POST') {
+    return new Response('Method Not Allowed', { status: 405 });
   }
 
   let body: PreviewCodeRequest;
