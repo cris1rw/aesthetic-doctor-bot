@@ -213,27 +213,38 @@ async function fetchMetrics(
 
 function formatTextSummary(payload: MetricsResponse, metrics: MetricKey[]): string {
   const lines: string[] = [];
+  const generatedAt = payload.generated_at ? formatDateTime(payload.generated_at) : formatDateTime();
+
+  lines.push(`📊 Snapshot generato il ${generatedAt}`);
+  lines.push('');
+
   const data = payload.metrics;
 
   for (const metric of metrics) {
     const rows = (data[metric] as MetricRow[]) ?? [];
     if (!rows.length) {
-      lines.push(`${metric}: nessun dato disponibile`);
+      lines.push(sectionTitle(metric));
+      lines.push('  • Nessun dato disponibile');
+      lines.push('');
       continue;
     }
 
     switch (metric) {
       case 'treatments_daily': {
-        lines.push('📅 Trattamenti giornalieri (ultimi 5):');
-        const subset = rows.slice(0, 5);
-        subset.forEach((row) => {
-          const date = formatDate(row.giorno);
-          lines.push(`  • ${date}: ${displayName(row)} → ${row.trattamenti ?? 0}`);
+        lines.push('📅 Trattamenti (ultimi 7 giorni):');
+        const subset = rows.slice(0, 7);
+        const grouped = subset.reduce<Record<string, number>>((acc, row) => {
+          const key = formatDate(row.giorno);
+          acc[key] = (acc[key] ?? 0) + Number(row.trattamenti ?? 0);
+          return acc;
+        }, {});
+        Object.entries(grouped).forEach(([day, value]) => {
+          lines.push(`  • ${day}: ${value} trattamenti totali`);
         });
         break;
       }
       case 'patients_totals': {
-        lines.push('👩‍⚕️ Pazienti gestiti (top 5):');
+        lines.push('👩‍⚕️ Pazienti gestiti (Top 5):');
         rows
           .slice(0, 5)
           .forEach((row) =>
@@ -242,19 +253,21 @@ function formatTextSummary(payload: MetricsResponse, metrics: MetricKey[]): stri
         break;
       }
       case 'treatments_per_patient': {
-        lines.push('🙋‍♀️ Trattamenti per paziente (top 5):');
+        lines.push('🙋‍♀️ Trattamenti per paziente (Top 5):');
         rows.slice(0, 5).forEach((row) => {
           lines.push(
-            `  • ${row.paziente_nome ?? 'N/D'} ${row.paziente_cognome ?? ''} (${displayName(row)}) → ${row.trattamenti_per_paziente ?? 0}`
+            `  • ${formatFullName(row.paziente_nome, row.paziente_cognome)} (${displayName(row)}) → ${row.trattamenti_per_paziente ?? 0}`
           );
         });
         break;
       }
       case 'photos_per_treatment': {
-        lines.push('📷 Foto per trattamento (top 3):');
+        lines.push('📷 Foto per trattamento (Top 3):');
         rows.slice(0, 3).forEach((row) => {
+          const owner = displayName(row);
+          const label = owner ? `${owner} (${shortenId(row.treatment_id)})` : shortenId(row.treatment_id);
           lines.push(
-            `  • ${row.treatment_id}: tot ${row.foto_totali ?? 0} (before ${row.foto_before ?? 0}, after ${
+            `  • ${label}: tot ${row.foto_totali ?? 0} (before ${row.foto_before ?? 0}, after ${
               row.foto_after ?? 0
             })`
           );
@@ -262,7 +275,7 @@ function formatTextSummary(payload: MetricsResponse, metrics: MetricKey[]): stri
         break;
       }
       case 'comparisons_summary': {
-        lines.push('🆚 Comparisons per medico (top 5):');
+        lines.push('🆚 Comparisons per medico (Top 5):');
         rows.slice(0, 5).forEach((row) => {
           lines.push(
             `  • ${displayName(row)} → tot ${row.comparisons_totali ?? 0} (final ${row.comparisons_complete ?? 0}, draft ${row.comparisons_incomplete ?? 0})`
@@ -278,7 +291,7 @@ function formatTextSummary(payload: MetricsResponse, metrics: MetricKey[]): stri
         break;
       }
       case 'comparisons_exports_recent': {
-        lines.push('📤 Export comparisons recenti (top 5):');
+        lines.push('📤 Export comparisons recenti (Top 5):');
         rows.slice(0, 5).forEach((row) => {
           lines.push(`  • ${displayName(row)} → ${row.last_export_ts ? formatDateTime(row.last_export_ts) : '–'}`);
         });
@@ -422,11 +435,16 @@ function buildChartData(metric: MetricKey, rows: MetricRow[]): {
 }
 
 function displayName(row: Record<string, unknown>): string {
-  const nome = row.nome ?? row.paziente_nome ?? '';
-  const cognome = row.cognome ?? row.paziente_cognome ?? '';
+  const nome = row.nome ?? '';
+  const cognome = row.cognome ?? '';
   const fallback = row.medico_id ?? row.patient_id ?? 'N/D';
   const composed = `${nome ?? ''} ${cognome ?? ''}`.trim();
   return composed || String(fallback);
+}
+
+function formatFullName(nome: unknown, cognome: unknown): string {
+  const composed = `${nome ?? ''} ${cognome ?? ''}`.trim();
+  return composed || 'N/D';
 }
 
 function formatDate(value: string | undefined): string {
@@ -440,8 +458,35 @@ function formatShortDate(value: string | undefined): string {
   return `${date.getDate()}/${date.getMonth() + 1}`;
 }
 
-function formatDateTime(value: string | undefined): string {
+function formatDateTime(value?: string): string {
   if (!value) return 'N/D';
   return new Date(value).toLocaleString('it-IT');
+}
+
+function shortenId(value: string | undefined, keep = 4): string {
+  if (!value) return 'N/D';
+  if (value.length <= keep * 2) return value;
+  return `${value.slice(0, keep)}…${value.slice(-keep)}`;
+}
+
+function sectionTitle(metric: MetricKey): string {
+  switch (metric) {
+    case 'treatments_daily':
+      return '📅 Trattamenti';
+    case 'patients_totals':
+      return '👩‍⚕️ Pazienti';
+    case 'treatments_per_patient':
+      return '🙋‍♀️ Trattamenti per paziente';
+    case 'photos_per_treatment':
+      return '📷 Foto per trattamento';
+    case 'comparisons_summary':
+      return '🆚 Comparisons per medico';
+    case 'comparisons_daily':
+      return '📈 Comparisons giornaliere';
+    case 'comparisons_exports_recent':
+      return '📤 Export Comparisons';
+    default:
+      return metric;
+  }
 }
 
