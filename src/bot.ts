@@ -264,6 +264,15 @@ async function findExistingCodes(codes: string[]): Promise<string[]> {
   const endpoint = env.PREVIEW_CODES_ENDPOINT;
   const token = env.PREVIEW_CODES_BOT_TOKEN;
 
+  // Log temporaneo per debug
+  logger.info({ 
+    hasEndpoint: !!endpoint, 
+    hasToken: !!token,
+    endpointValue: endpoint ? `${endpoint.substring(0, 20)}...` : 'undefined',
+    tokenValue: token ? `${token.substring(0, 10)}...` : 'undefined',
+    allEnvKeys: Object.keys(process.env).filter(k => k.includes('PREVIEW') || k.includes('preview'))
+  }, 'Debug PREVIEW_CODES config');
+
   if (!endpoint || !token) {
     logger.warn('La funzione preview-codes non è configurata per la verifica. Assumendo che i codici non esistano.');
     return [];
